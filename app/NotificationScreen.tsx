@@ -21,6 +21,7 @@ type NotificationType =
   | "REMINDERS"
   | "GENERAL ANNOUNCEMENT"
   | "URGENT"
+  | "TASK"
   | "POLICY ANNOUNCEMENT";
 
 interface Announcement {
@@ -43,63 +44,74 @@ const NotificationScreen: React.FC = () => {
 
   useEffect(() => {
     let isMounted = true;
+    
     const fetchAnnouncements = async () => {
       try {
         const studentId = await AsyncStorage.getItem("student_id");
-        if (!studentId) {
-          throw new Error("Student ID not found in AsyncStorage");
-        }
-
+        if (!studentId) throw new Error("Student ID not found in AsyncStorage");
+  
         const response = await fetch(
           `${Config.API_BASE_URL}/api/latest-announcement?student_id=${studentId}`
         );
         const data = await response.json();
-
-        if (!response.ok) {
-          throw new Error(data.error || "Failed to fetch announcements");
-        }
-
-        const transformedData: Announcement[] = data.announcements.map(
-          (item: any) => ({
-            id: item.announce_id,
-            type: item.announcement_type,
-            date: item.announcement_date,
-            content: item.announcement_content,
-          })
-        );
-
+  
+        if (!response.ok) throw new Error(data.error || "Failed to fetch announcements");
+  
+        const transformedData: Announcement[] = data.announcements.map((item: any) => ({
+          id: item.id,
+          type: item.type,
+          date: new Date(item.date).toLocaleDateString('en-US', {
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+          }),
+          content: item.content,
+        }));
+        await AsyncStorage.setItem(`announcements_${studentId}`, JSON.stringify(transformedData));
         if (isMounted) {
           setAnnouncements(transformedData);
           setError(null);
         }
       } catch (err) {
         if (isMounted) {
-          if (err instanceof Error) {
-            setError(err.message);
-          } else {
-            setError("An unknown error occurred");
-          }
+          setError(err instanceof Error ? err.message : "An unknown error occurred");
           setAnnouncements([]);
         }
       } finally {
-        if (isMounted) {
-          setLoading(false);
-        }
+        if (isMounted) setLoading(false);
       }
     };
-
+  
     // Initial fetch
     setLoading(true);
     fetchAnnouncements();
-
+  
     // Set up polling every 30 seconds
     const intervalId = setInterval(fetchAnnouncements, 30000);
-
-    // Cleanup function
+  
+    // Cleanup
     return () => {
       isMounted = false;
       clearInterval(intervalId);
     };
+  }, []); 
+
+  useEffect(() => {
+    const loadReadAnnouncements = async () => {
+      try {
+        const studentId = await AsyncStorage.getItem("student_id");
+        if (!studentId) return;
+  
+        const readAnnouncements = await AsyncStorage.getItem(`readAnnouncements_${studentId}`);
+        if (readAnnouncements) {
+          setClickedNotifications(JSON.parse(readAnnouncements));
+        }
+      } catch (error) {
+        console.error("Failed to load read announcements:", error);
+      }
+    };
+  
+    loadReadAnnouncements();
   }, []);
 
   const getIcon = (type: NotificationType) => {
@@ -131,6 +143,15 @@ const NotificationScreen: React.FC = () => {
             style={styles.icon}
           />
         );
+        case "TASK":
+          return (
+            <MaterialCommunityIcons
+              name="clipboard-text"
+              size={30}
+              color="#0b9ca7"
+              style={styles.icon}
+            />
+          );
       case "POLICY ANNOUNCEMENT":
         return (
           <Ionicons
@@ -154,24 +175,22 @@ const NotificationScreen: React.FC = () => {
 
   const handleNotificationClick = async (notification: Announcement) => {
     setSelectedNotification(notification);
+    
     if (!clickedNotifications.includes(notification.id)) {
-      setClickedNotifications([...clickedNotifications, notification.id]);
-
-      // Mark as read on the server
+      const newClicked = [...clickedNotifications, notification.id];
+      setClickedNotifications(newClicked);
+  
+      // Save to AsyncStorage
       try {
         const studentId = await AsyncStorage.getItem("student_id");
-        await fetch(`${Config.API_BASE_URL}/api/mark-as-read`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            student_id: studentId,
-            announcement_id: notification.id,
-          }),
-        });
+        if (studentId) {
+          await AsyncStorage.setItem(
+            `readAnnouncements_${studentId}`,
+            JSON.stringify(newClicked)
+          );
+        }
       } catch (error) {
-        console.error("Failed to mark as read:", error);
+        console.error("Failed to save read status:", error);
       }
     }
   };

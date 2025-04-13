@@ -12,7 +12,6 @@ interface TaskCardProps {
   taskType: string;
   description: string;
   progress: number;
-  taskId: number | null;
   onAddPress?: () => void;
   onCardPress?: () => void;
 }
