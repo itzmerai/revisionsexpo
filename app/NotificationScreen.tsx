@@ -33,75 +33,73 @@ interface Announcement {
 
 const NotificationScreen: React.FC = () => {
   const router = useRouter();
-  const [selectedNotification, setSelectedNotification] =
-    useState<Announcement | null>(null);
-  const [clickedNotifications, setClickedNotifications] = useState<number[]>(
-    []
-  );
+  const [selectedNotification, setSelectedNotification] = useState<Announcement | null>(null);
+  const [clickedNotifications, setClickedNotifications] = useState<number[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const fetchAnnouncements = async () => {
+    try {
+      const studentId = await AsyncStorage.getItem("student_id");
+      if (!studentId) throw new Error("Student ID not found in AsyncStorage");
+
+      const response = await fetch(
+        `${Config.API_BASE_URL}/api/latest-announcement?student_id=${studentId}`
+      );
+      const data = await response.json();
+
+      if (!response.ok) throw new Error(data.error || "Failed to fetch announcements");
+
+      const transformedData: Announcement[] = data.announcements.map((item: any) => ({
+        id: item.id,
+        type: item.type,
+        date: new Date(item.date).toLocaleDateString('en-US', {
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+        }),
+        content: item.content,
+      }));
+
+      await AsyncStorage.setItem(`announcements_${studentId}`, JSON.stringify(transformedData));
+      await AsyncStorage.setItem("last_announcement_update", Date.now().toString());
+
+      setAnnouncements(transformedData);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "An unknown error occurred");
+      setAnnouncements([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     let isMounted = true;
     
-    const fetchAnnouncements = async () => {
-      try {
-        const studentId = await AsyncStorage.getItem("student_id");
-        if (!studentId) throw new Error("Student ID not found in AsyncStorage");
-  
-        const response = await fetch(
-          `${Config.API_BASE_URL}/api/latest-announcement?student_id=${studentId}`
-        );
-        const data = await response.json();
-  
-        if (!response.ok) throw new Error(data.error || "Failed to fetch announcements");
-  
-        const transformedData: Announcement[] = data.announcements.map((item: any) => ({
-          id: item.id,
-          type: item.type,
-          date: new Date(item.date).toLocaleDateString('en-US', {
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric',
-          }),
-          content: item.content,
-        }));
-        await AsyncStorage.setItem(`announcements_${studentId}`, JSON.stringify(transformedData));
-        if (isMounted) {
-          setAnnouncements(transformedData);
-          setError(null);
-        }
-      } catch (err) {
-        if (isMounted) {
-          setError(err instanceof Error ? err.message : "An unknown error occurred");
-          setAnnouncements([]);
-        }
-      } finally {
-        if (isMounted) setLoading(false);
-      }
+    const initializeData = async () => {
+      await fetchAnnouncements();
+      const intervalId = setInterval(fetchAnnouncements, 3000);
+      return () => clearInterval(intervalId);
     };
-  
-    // Initial fetch
-    setLoading(true);
-    fetchAnnouncements();
-  
-    // Set up polling every 30 seconds
-    const intervalId = setInterval(fetchAnnouncements, 30000);
-  
-    // Cleanup
+
+    if (isMounted) {
+      setLoading(true);
+      initializeData();
+    }
+
     return () => {
       isMounted = false;
-      clearInterval(intervalId);
     };
-  }, []); 
+  }, []);
 
   useEffect(() => {
     const loadReadAnnouncements = async () => {
       try {
         const studentId = await AsyncStorage.getItem("student_id");
         if (!studentId) return;
-  
+
         const readAnnouncements = await AsyncStorage.getItem(`readAnnouncements_${studentId}`);
         if (readAnnouncements) {
           setClickedNotifications(JSON.parse(readAnnouncements));
@@ -110,9 +108,31 @@ const NotificationScreen: React.FC = () => {
         console.error("Failed to load read announcements:", error);
       }
     };
-  
+
     loadReadAnnouncements();
   }, []);
+
+  const handleNotificationClick = async (notification: Announcement) => {
+    setSelectedNotification(notification);
+    
+    if (!clickedNotifications.includes(notification.id)) {
+      const newClicked = [...clickedNotifications, notification.id];
+      setClickedNotifications(newClicked);
+
+      try {
+        const studentId = await AsyncStorage.getItem("student_id");
+        if (studentId) {
+          await AsyncStorage.setItem(
+            `readAnnouncements_${studentId}`,
+            JSON.stringify(newClicked)
+          );
+          await AsyncStorage.setItem("last_read_update", Date.now().toString());
+        }
+      } catch (error) {
+        console.error("Failed to save read status:", error);
+      }
+    }
+  };
 
   const getIcon = (type: NotificationType) => {
     switch (type) {
@@ -143,15 +163,15 @@ const NotificationScreen: React.FC = () => {
             style={styles.icon}
           />
         );
-        case "TASK":
-          return (
-            <MaterialCommunityIcons
-              name="clipboard-text"
-              size={30}
-              color="#0b9ca7"
-              style={styles.icon}
-            />
-          );
+      case "TASK":
+        return (
+          <MaterialCommunityIcons
+            name="clipboard-text"
+            size={30}
+            color="#0b9ca7"
+            style={styles.icon}
+          />
+        );
       case "POLICY ANNOUNCEMENT":
         return (
           <Ionicons
@@ -173,28 +193,6 @@ const NotificationScreen: React.FC = () => {
     }
   };
 
-  const handleNotificationClick = async (notification: Announcement) => {
-    setSelectedNotification(notification);
-    
-    if (!clickedNotifications.includes(notification.id)) {
-      const newClicked = [...clickedNotifications, notification.id];
-      setClickedNotifications(newClicked);
-  
-      // Save to AsyncStorage
-      try {
-        const studentId = await AsyncStorage.getItem("student_id");
-        if (studentId) {
-          await AsyncStorage.setItem(
-            `readAnnouncements_${studentId}`,
-            JSON.stringify(newClicked)
-          );
-        }
-      } catch (error) {
-        console.error("Failed to save read status:", error);
-      }
-    }
-  };
-
   const closeModal = () => {
     setSelectedNotification(null);
   };
@@ -208,11 +206,7 @@ const NotificationScreen: React.FC = () => {
       />
       <ScrollView style={styles.scrollView}>
         {loading ? (
-          <ActivityIndicator
-            size="large"
-            color="#0b9ca7"
-            //style={styles.loader}
-          />
+          <ActivityIndicator size="large" color="#0b9ca7" />
         ) : error ? (
           <Text style={styles.errorText}>{error}</Text>
         ) : announcements.length === 0 ? (
@@ -224,9 +218,7 @@ const NotificationScreen: React.FC = () => {
               style={[
                 styles.notificationBox,
                 {
-                  backgroundColor: clickedNotifications.includes(
-                    notification.id
-                  )
+                  backgroundColor: clickedNotifications.includes(notification.id)
                     ? "#fff"
                     : "#e3f2fd",
                 },
@@ -289,7 +281,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
-    height: 100, // Fixed height
+    height: 100,
   },
   icon: {
     marginRight: 15,

@@ -1,58 +1,59 @@
 import React, { useEffect, useState } from "react";
-import { TouchableOpacity, StyleSheet, View, Text } from "react-native";
+import { TouchableOpacity, StyleSheet, View, Text, AppState } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useRouter, useFocusEffect } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const NotificationIcon: React.FC = () => {
   const router = useRouter();
   const [unreadCount, setUnreadCount] = useState(0);
 
+  const calculateUnreadCount = async () => {
+    try {
+      const studentId = await AsyncStorage.getItem("student_id");
+      if (!studentId) return;
+
+      const [announcementsData, readAnnouncementsData] = await Promise.all([
+        AsyncStorage.getItem(`announcements_${studentId}`),
+        AsyncStorage.getItem(`readAnnouncements_${studentId}`),
+      ]);
+
+      const announcements = announcementsData ? JSON.parse(announcementsData) : [];
+      const readAnnouncements = readAnnouncementsData ? JSON.parse(readAnnouncementsData) : [];
+      
+      const newUnreadCount = announcements.filter(
+        (ann: any) => !readAnnouncements.includes(ann.id)
+      ).length;
+
+      setUnreadCount(newUnreadCount);
+    } catch (error) {
+      console.error("Failed to calculate unread count:", error);
+    }
+  };
+
   useEffect(() => {
     let isMounted = true;
+    
+    const intervalId = setInterval(() => {
+      if (isMounted) calculateUnreadCount();
+    }, 3000);
 
-    const calculateUnreadCount = async () => {
-      try {
-        const studentId = await AsyncStorage.getItem("student_id");
-        if (!studentId) return;
-
-        const [announcementsData, readAnnouncementsData] = await Promise.all([
-          AsyncStorage.getItem(`announcements_${studentId}`),
-          AsyncStorage.getItem(`readAnnouncements_${studentId}`),
-        ]);
-
-        const announcements = announcementsData ? JSON.parse(announcementsData) : [];
-        const readAnnouncements = readAnnouncementsData ? JSON.parse(readAnnouncementsData) : [];
-        
-        // Calculate unread count by checking which announcements haven't been read
-        interface Announcement {
-          id: string;
-          [key: string]: any; // Adjust fields as per your actual data structure
-        }
-
-        const newUnreadCount = announcements.filter(
-          (ann: Announcement) => !readAnnouncements.includes(ann.id)
-        ).length;
-
-        if (isMounted) {
-          setUnreadCount(newUnreadCount);
-        }
-      } catch (error) {
-        console.error("Failed to calculate unread count:", error);
-      }
-    };
-
-    // Initial calculation
-    calculateUnreadCount();
-
-    // Set up polling every 30 seconds
-    const intervalId = setInterval(calculateUnreadCount, 30000);
+    const subscription = AppState.addEventListener("change", (nextAppState) => {
+      if (nextAppState === "active") calculateUnreadCount();
+    });
 
     return () => {
       isMounted = false;
       clearInterval(intervalId);
+      subscription.remove();
     };
   }, []);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      calculateUnreadCount();
+    }, [])
+  );
 
   const handleNotificationPress = () => {
     router.push("/NotificationScreen");
@@ -80,7 +81,6 @@ const NotificationIcon: React.FC = () => {
     </TouchableOpacity>
   );
 };
-
 
 const styles = StyleSheet.create({
   container: {
